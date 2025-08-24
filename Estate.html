@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Property Management System (Vanilla JS)</title>
+  <style>
+    :root{
+      --bg:#f7f7fb; --card:#fff; --ink:#111; --muted:#6b7280; --brand:#0ea5e9; --danger:#ef4444;
+      --border:#e5e7eb; --ring:#93c5fd; --success:#16a34a; --warn:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; color:var(--ink);background:linear-gradient(#fafafa,#f2f4f8)}
+    header{position:sticky;top:0;background:rgba(255,255,255,.8);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);z-index:10}
+    .wrap{max-width:1100px;margin:auto;padding:16px}
+    h1{font-size:18px;margin:0;display:flex;gap:10px;align-items:center}
+    .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 2px 6px rgba(0,0,0,.04)}
+    .kpi{padding:14px}
+    .kpi .val{font-weight:700;font-size:20px}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    .tab{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
+    .tab.active{background:var(--brand);color:#fff;border-color:transparent}
+    .toolbar{display:flex;gap:8px;align-items:center}
+    input,select,button,textarea{font:inherit}
+    input,select,textarea{padding:8px 10px;border-radius:10px;border:1px solid var(--border);width:100%}
+    button{padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:#fff;cursor:pointer}
+    button.primary{background:var(--brand);border-color:transparent;color:#fff}
+    button.ghost{background:transparent}
+    button.danger{background:var(--danger);color:#fff;border-color:transparent}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+    th{font-weight:600;color:#334155;background:#fafafa}
+    tbody tr:hover{background:#fafcff}
+    .grid{display:grid;gap:12px}
+    .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .right{margin-left:auto}
+    .muted{color:var(--muted)}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border)}
+    .badge.ok{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+    .badge.warn{background:#fffbeb;color:#92400e;border-color:#fde68a}
+    .badge.danger{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+    .section{margin:16px 0}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    /* Modal */
+    .modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;padding:16px}
+    .modal.open{display:flex}
+    .sheet{background:#fff;border-radius:16px;max-width:640px;width:100%;border:1px solid var(--border)}
+    .sheet header{position:unset;background:#fff;border-bottom:1px solid var(--border)}
+    .sheet .body{padding:16px}
+    .sheet footer{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--border)}
+    .help{font-size:12px;color:var(--muted)}
+    .spacer{height:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap row">
+      <h1>🏢 Property Management System</h1>
+      <div class="right row">
+        <input id="q" placeholder="Search properties, units, tenants…" style="width:320px"/>
+        <button id="export" title="Export CSV">⬇️ Export CSV</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="kpis" id="kpis">
+      <!-- KPI cards injected here -->
+    </section>
+
+    <div class="tabs" id="tabs"></div>
+
+    <section id="content" class="section"></section>
+  </main>
+
+  <!-- Reusable modal -->
+  <div class="modal" id="modal">
+    <div class="sheet">
+      <header class="row" style="justify-content:space-between;padding:12px 16px">
+        <strong id="modal-title">Modal</strong>
+        <button id="modal-close" class="ghost">✖</button>
+      </header>
+      <div class="body" id="modal-body"></div>
+      <footer id="modal-actions"></footer>
+    </div>
+  </div>
+
+  <script type="module">
+    // ===== State & Utilities =====
+    const LS_KEY = 'pms_state_v1';
+    const nowISO = () => new Date().toISOString();
+    const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,8)}`;
+    const shillings = n => new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n||0);
+
+    const defaultState = {
+      properties:[
+        { id:'p1', name:'Sunrise Apartments', address:'123 Ngong Rd, Nairobi', manager:'Alice', createdAt: nowISO() },
+        { id:'p2', name:'Kilimani Suites', address:'45 Kindaruma Rd, Nairobi', manager:'Brian', createdAt: nowISO() },
+      ],
+      units:[
+        { id:'u1', propertyId:'p1', name:'A-101', bedrooms:2, bathrooms:1, rent:55000, status:'occupied' },
+        { id:'u2', propertyId:'p1', name:'A-102', bedrooms:1, bathrooms:1, rent:40000, status:'vacant' },
+        { id:'u3', propertyId:'p2', name:'B-301', bedrooms:3, bathrooms:2, rent:90000, status:'occupied' },
+      ],
+      tenants:[
+        { id:'t1', name:'John Doe', phone:'+254700000001', email:'john@example.com' },
+        { id:'t2', name:'Mary Wambui', phone:'+254700000002', email:'mary@example.com' },
+      ],
+      leases:[
+        { id:'l1', unitId:'u1', tenantId:'t1', startDate:'2025-01-01', endDate:'2025-12-31', rent:55000, deposit:55000, status:'active' },
+        { id:'l2', unitId:'u3', tenantId:'t2', startDate:'2025-03-01', endDate:'2026-02-28', rent:90000, deposit:90000, status:'active' },
+      ],
+      workOrders:[
+        { id:'w1', propertyId:'p1', unitId:'u1', title:'Leaking sink', description:'Kitchen sink leak', priority:'high', status:'open', createdAt: nowISO() },
+      ],
+      payments:[
+        { id:'pay1', leaseId:'l1', amount:55000, method:'mpesa', date:'2025-08-01', reference:'MPESA123' },
+        { id:'pay2', leaseId:'l2', amount:90000, method:'bank', date:'2025-08-01', reference:'BANK789' },
+      ],
+    };
+
+    let state = load();
+    function load(){ try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):structuredClone(defaultState);}catch{ return structuredClone(defaultState);} }
+    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+    // Derived maps
+    const maps = () => ({
+      properties: Object.fromEntries(state.properties.map(p=>[p.id,p])),
+      units: Object.fromEntries(state.units.map(u=>[u.id,u])),
+      tenants: Object.fromEntries(state.tenants.map(t=>[t.id,t])),
+      leases: Object.fromEntries(state.leases.map(l=>[l.id,l])),
+    });
+
+    // ===== Simple Renderer =====
+    const el = sel => document.querySelector(sel);
+    const content = el('#content');
+    const q = el('#q');
+
+    const sections = [
+      { id:'dashboard', label:'Dashboard' },
+      { id:'properties', label:'Properties' },
+      { id:'units', label:'Units' },
+      { id:'tenants', label:'Tenants' },
+      { id:'leases', label:'Leases' },
+      { id:'work', label:'Work Orders' },
+      { id:'payments', label:'Payments' },
+    ];
+    let active = 'dashboard';
+
+    function renderTabs(){
+      const tabs = el('#tabs');
+      tabs.innerHTML = sections.map(s=>`<button class="tab ${active===s.id?'active':''}" data-id="${s.id}">${s.label}</button>`).join('');
+      tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{active=b.dataset.id; render();});
+    }
+
+    function renderKPIs(){
+      const m = maps();
+      const totalUnits = state.units.length;
+      const occupiedUnits = state.units.filter(u=>u.status==='occupied').length;
+      const vacancyRate = totalUnits? Math.round(((totalUnits-occupiedUnits)/totalUnits)*100):0;
+      const monthlyRentRoll = state.leases.filter(l=>l.status!=='ended').reduce((s,l)=>s+(l.rent||0),0);
+      const monthPrefix = new Date().toISOString().slice(0,7);
+      const collectedThisMonth = state.payments.filter(p=>p.date?.slice(0,7)===monthPrefix).reduce((s,p)=>s+p.amount,0);
+
+      el('#kpis').innerHTML = `
+        <div class="card kpi"><div class="muted">Total Units</div><div class="val">${totalUnits}</div></div>
+        <div class="card kpi"><div class="muted">Occupied</div><div class="val">${occupiedUnits}</div></div>
+        <div class="card kpi"><div class="muted">Vacancy Rate</div><div class="val">${vacancyRate}%</div></div>
+        <div class="card kpi"><div class="muted">Rent Roll</div><div class="val">${shillings(monthlyRentRoll)}</div></div>
+        <div class="card kpi"><div class="muted">Collected (This Mo)</div><div class="val">${shillings(collectedThisMonth)}</div></div>
+      `;
+    }
+
+    // ===== Generic helpers =====
+    function openModal(title, bodyHTML, actions){
+      el('#modal-title').textContent = title;
+      el('#modal-body').innerHTML = bodyHTML;
+      const footer = el('#modal-actions');
+      footer.innerHTML = '';
+      actions.forEach(a=>{
+        const btn = document.createElement('button');
+        btn.textContent = a.label; btn.className = a.class||''; btn.onclick = a.onClick; footer.appendChild(btn);
+      });
+      el('#modal').classList.add('open');
+    }
+    function closeModal(){ el('#modal').classList.remove('open'); }
+    el('#modal-close').onclick = closeModal;
+
+    function confirmDanger(msg){ return window.confirm(msg); }
+
+    function inputVal(id){ return el(`#${id}`).value; }
+
+    function textRow(id,label,value='',type='text',extra=''){
+      return `<label class="grid grid-2" style="align-items:center"><span class="muted">${label}</span><input id="${id}" type="${type}" value="${value??''}" ${extra}/></label>`;
+    }
+    function numberRow(id,label,value=0,min=0){
+      return `<label class="grid grid-2" style="align-items:center"><span class="muted">${label}</span><input id="${id}" type="number" value="${value}" min="${min}"/></label>`;
+    }
+
+    // ===== Sections =====
+    function render(){
+      renderTabs();
+      renderKPIs();
+      const query = (q.value||'').toLowerCase();
+      const m = maps();
+
+      if(active==='dashboard'){
+        content.innerHTML = `<div class="grid grid-3">
+          <div class="card" style="padding:16px">
+            <h3>Quick Add</h3>
+            <div class="spacer"></div>
+            <div class="grid">
+              <button class="primary" id="qa-prop">+ Property</button>
+              <button class="primary" id="qa-unit">+ Unit</button>
+              <button class="primary" id="qa-tenant">+ Tenant</button>
+              <button class="primary" id="qa-lease">+ Lease</button>
+              <button class="primary" id="qa-pay">+ Payment</button>
+              <button class="primary" id="qa-work">+ Work Order</button>
+            </div>
+          </div>
+          <div class="card" style="padding:16px">
+            <h3>Recent Payments</h3>
+            <table><thead><tr><th>Date</th><th>Tenant</th><th>Unit</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${[...state.payments].slice(-5).reverse().map(p=>{
+                const l = m.leases[p.leaseId]; const u=m.units[l?.unitId]; const t=m.tenants[l?.tenantId];
+                return `<tr><td>${p.date}</td><td>${t?.name||'-'}</td><td>${u?.name||'-'}</td><td>${shillings(p.amount)}</td></tr>`
+              }).join('')}
+            </tbody></table>
+          </div>
+          <div class="card" style="padding:16px">
+            <h3>Open Work Orders</h3>
+            <table><thead><tr><th>Title</th><th>Unit</th><th>Priority</th><th>Status</th></tr></thead>
+            <tbody>
+              ${state.workOrders.filter(w=>w.status!=='closed').slice(-6).reverse().map(w=>{
+                const u=m.units[w.unitId];
+                const badge = w.priority==='high'?'badge danger': w.priority==='medium'?'badge warn':'badge';
+                const sbadge = w.status==='open'?'badge warn': w.status==='in-progress'?'badge':'';
+                return `<tr><td>${w.title}</td><td>${u?.name||'-'}</td><td><span class="${badge}">${w.priority}</span></td><td><span class="${sbadge}">${w.status}</span></td></tr>`
+              }).join('')}
+            </tbody></table>
+          </div>
+        </div>`;
+        // Quick add buttons open relevant modals
+        el('#qa-prop').onclick = ()=> openPropertyModal();
+        el('#qa-unit').onclick = ()=> openUnitModal();
+        el('#qa-tenant').onclick = ()=> openTenantModal();
+        el('#qa-lease').onclick = ()=> openLeaseModal();
+        el('#qa-pay').onclick = ()=> openPaymentModal();
+        el('#qa-work').onclick = ()=> openWorkOrderModal();
+        return;
+      }
+
+      if(active==='properties'){
+        const list = state.properties.filter(p=> [p.name,p.address,p.manager].some(v=>v?.toLowerCase().includes(query)) );
+        content.innerHTML = `
+          <div class="row"><h3>Properties</h3><span class="right"></span><button class="primary" id="add">+ Add Property</button></div>
+          <div class="card"><table><thead><tr><th>Name</th><th>Address</th><th>Manager</th><th></th></tr></thead>
+          <tbody>${list.map(p=>`<tr><td>${p.name}</td><td>${p.address}</td><td>${p.manager}</td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${p.id}" class="ghost edit">✏️</button><button data-id="${p.id}" class="danger del">🗑️</button></td></tr>`).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openPropertyModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openPropertyModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete property? Units remain but will be orphaned.')) return; state.properties = state.properties.filter(x=>x.id!==b.dataset.id); save(); render(); });
+        return;
+      }
+
+      if(active==='units'){
+        const list = state.units.filter(u=>{
+          const p = m.properties[u.propertyId];
+          return [u.name,String(u.bedrooms),String(u.bathrooms),String(u.rent),u.status,p?.name].some(v=>v?.toLowerCase().includes(query));
+        });
+        content.innerHTML = `
+          <div class="row"><h3>Units</h3><span class="right"></span><button class="primary" id="add">+ Add Unit</button></div>
+          <div class="card"><table><thead><tr><th>Unit</th><th>Property</th><th>Beds/Baths</th><th>Rent</th><th>Status</th><th></th></tr></thead>
+          <tbody>${list.map(u=>`<tr><td>${u.name}</td><td>${m.properties[u.propertyId]?.name||'-'}</td><td>${u.bedrooms}/${u.bathrooms}</td><td>${shillings(u.rent)}</td><td><span class="badge ${u.status==='occupied'?'ok':'warn'}">${u.status}</span></td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${u.id}" class="ghost edit">✏️</button><button data-id="${u.id}" class="danger del">🗑️</button></td></tr>`).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openUnitModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openUnitModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete unit?')) return; state.units = state.units.filter(x=>x.id!==b.dataset.id); save(); render(); });
+        return;
+      }
+
+      if(active==='tenants'){
+        const list = state.tenants.filter(t=> [t.name,t.phone,t.email].some(v=>v?.toLowerCase().includes(query)) );
+        content.innerHTML = `
+          <div class="row"><h3>Tenants</h3><span class="right"></span><button class="primary" id="add">+ Add Tenant</button></div>
+          <div class="card"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th></th></tr></thead>
+          <tbody>${list.map(t=>`<tr><td>${t.name}</td><td>${t.phone}</td><td>${t.email}</td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${t.id}" class="ghost edit">✏️</button><button data-id="${t.id}" class="danger del">🗑️</button></td></tr>`).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openTenantModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openTenantModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete tenant?')) return; state.tenants = state.tenants.filter(x=>x.id!==b.dataset.id); save(); render(); });
+        return;
+      }
+
+      if(active==='leases'){
+        const list = state.leases.filter(l=>{
+          const u=m.units[l.unitId]; const t=m.tenants[l.tenantId]; const p=m.properties[u?.propertyId];
+          return [l.id,u?.name,t?.name,p?.name,l.status].some(v=>v?.toLowerCase().includes(query));
+        });
+        content.innerHTML = `
+          <div class="row"><h3>Leases</h3><span class="right"></span><button class="primary" id="add">+ Add Lease</button></div>
+          <div class="card"><table><thead><tr><th>Lease</th><th>Unit</th><th>Tenant</th><th>Start → End</th><th>Rent</th><th>Status</th><th></th></tr></thead>
+          <tbody>${list.map(l=>{const u=m.units[l.unitId], t=m.tenants[l.tenantId];return `<tr><td>${l.id}</td><td>${u?.name||'-'}</td><td>${t?.name||'-'}</td><td>${l.startDate} → ${l.endDate}</td><td>${shillings(l.rent)}</td><td><span class="badge ${l.status==='active'?'ok':(l.status==='pending'?'warn':'')}">${l.status}</span></td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${l.id}" class="ghost edit">✏️</button><button data-id="${l.id}" class="danger del">🗑️</button></td></tr>`}).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openLeaseModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openLeaseModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete lease? Payments remain and may point to missing lease.')) return; state.leases = state.leases.filter(x=>x.id!==b.dataset.id); save(); render(); });
+        return;
+      }
+
+      if(active==='work'){
+        const list = state.workOrders.filter(w=>{
+          const u=m.units[w.unitId]; const p=m.properties[w.propertyId];
+          return [w.title,w.description,w.priority,w.status,u?.name,p?.name].some(v=>v?.toLowerCase().includes(query));
+        });
+        content.innerHTML = `
+          <div class="row"><h3>Work Orders</h3><span class="right"></span><button class="primary" id="add">+ Add Work Order</button></div>
+          <div class="card"><table><thead><tr><th>Title</th><th>Unit</th><th>Priority</th><th>Status</th><th>Created</th><th></th></tr></thead>
+          <tbody>${list.map(w=>`<tr><td>${w.title}</td><td>${m.units[w.unitId]?.name||'-'}</td><td><span class="badge ${w.priority==='high'?'danger':(w.priority==='medium'?'warn':'')}">${w.priority}</span></td><td>${w.status}</td><td>${new Date(w.createdAt).toLocaleString()}</td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${w.id}" class="ghost edit">✏️</button><button data-id="${w.id}" class="danger del">🗑️</button></td></tr>`).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openWorkOrderModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openWorkOrderModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete work order?')) return; state.workOrders = state.workOrders.filter(x=>x.id!==b.dataset.id); save(); render(); });
+        return;
+      }
+
+      if(active==='payments'){
+        const list = state.payments.filter(p=>{
+          const l=m.leases[p.leaseId]; const u=m.units[l?.unitId]; const t=m.tenants[l?.tenantId];
+          return [p.date,p.method,p.reference,u?.name,t?.name].some(v=>v?.toLowerCase().includes(query));
+        });
+        content.innerHTML = `
+          <div class="row"><h3>Payments</h3><span class="right"></span><button class="primary" id="add">+ Add Payment</button></div>
+          <div class="card"><table><thead><tr><th>Date</th><th>Tenant</th><th>Unit</th><th>Amount</th><th>Method</th><th>Ref</th><th></th></tr></thead>
+          <tbody>${list.map(p=>{const l=m.leases[p.leaseId], u=m.units[l?.unitId], t=m.tenants[l?.tenantId];return `<tr><td>${p.date}</td><td>${t?.name||'-'}</td><td>${u?.name||'-'}</td><td>${shillings(p.amount)}</td><td>${p.method}</td><td>${p.reference||''}</td>
+            <td class="row" style="justify-content:flex-end"><button data-id="${p.reference}" class="ghost edit">✏️</button><button data-id="${p.reference}" class="danger del">🗑️</button></td></tr>`}).join('')}</tbody></table></div>`;
+        el('#add').onclick = ()=> openPaymentModal();
+        content.querySelectorAll('.edit').forEach(b=>b.onclick=()=> openPaymentModal(b.dataset.id));
+        content.querySelectorAll('.del').forEach(b=>b.onclick=()=>{ if(!confirmDanger('Delete payment?')) return; state.payments = state.payments.filter(x=>x.reference!==b.dataset.id); save(); render(); });
+        return;
+      }
+    }
+
+    // ===== Modals for CRUD =====
+    function openPropertyModal(id){
+      const item = id? state.properties.find(p=>p.id===id): { id:uid('p'), name:'', address:'', manager:'', createdAt: nowISO() };
+      openModal(id?'Edit Property':'Add Property', `
+        <div class="grid">
+          ${textRow('name','Name', item.name)}
+          ${textRow('address','Address', item.address)}
+          ${textRow('manager','Manager', item.manager)}
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { ...item, name:inputVal('name'), address:inputVal('address'), manager:inputVal('manager') };
+          if(!rec.name.trim()) return alert('Name is required');
+          if(id){ state.properties = state.properties.map(p=>p.id===id?rec:p);} else { state.properties.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    function openUnitModal(id){
+      const item = id? state.units.find(u=>u.id===id): { id:uid('u'), propertyId: state.properties[0]?.id||'', name:'', bedrooms:1, bathrooms:1, rent:0, status:'vacant' };
+      openModal(id?'Edit Unit':'Add Unit', `
+        <div class="grid">
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Property</span>
+            <select id="propertyId">${state.properties.map(p=>`<option value="${p.id}" ${p.id===item.propertyId?'selected':''}>${p.name}</option>`).join('')}</select>
+          </label>
+          ${textRow('uname','Unit Name', item.name)}
+          ${numberRow('beds','Bedrooms', item.bedrooms, 0)}
+          ${numberRow('baths','Bathrooms', item.bathrooms, 0)}
+          ${numberRow('rent','Monthly Rent (KES)', item.rent, 0)}
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Status</span>
+            <select id="status">${['vacant','occupied','maintenance'].map(s=>`<option ${s===item.status?'selected':''}>${s}</option>`).join('')}</select>
+          </label>
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { ...item,
+            propertyId: inputVal('propertyId'), name: inputVal('uname'), bedrooms: +inputVal('beds'), bathrooms:+inputVal('baths'), rent:+inputVal('rent'), status: inputVal('status') };
+          if(!rec.propertyId) return alert('Select property');
+          if(!rec.name.trim()) return alert('Unit name is required');
+          if(id){ state.units = state.units.map(u=>u.id===id?rec:u);} else { state.units.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    function openTenantModal(id){
+      const item = id? state.tenants.find(t=>t.id===id): { id:uid('t'), name:'', phone:'', email:'' };
+      openModal(id?'Edit Tenant':'Add Tenant', `
+        <div class="grid">
+          ${textRow('tname','Name', item.name)}
+          ${textRow('phone','Phone', item.phone)}
+          ${textRow('email','Email', item.email, 'email')}
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { ...item, name:inputVal('tname'), phone:inputVal('phone'), email:inputVal('email') };
+          if(!rec.name.trim()) return alert('Name is required');
+          if(id){ state.tenants = state.tenants.map(t=>t.id===id?rec:t);} else { state.tenants.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    function openLeaseModal(id){
+      const item = id? state.leases.find(l=>l.id===id): { id:uid('l'), unitId: state.units[0]?.id||'', tenantId: state.tenants[0]?.id||'', startDate:'', endDate:'', rent:0, deposit:0, status:'active' };
+      openModal(id?'Edit Lease':'Add Lease', `
+        <div class="grid">
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Unit</span>
+            <select id="unitId">${state.units.map(u=>`<option value="${u.id}" ${u.id===item.unitId?'selected':''}>${u.name}</option>`).join('')}</select>
+          </label>
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Tenant</span>
+            <select id="tenantId">${state.tenants.map(t=>`<option value="${t.id}" ${t.id===item.tenantId?'selected':''}>${t.name}</option>`).join('')}</select>
+          </label>
+          ${textRow('start','Start Date', item.startDate, 'date')}
+          ${textRow('end','End Date', item.endDate, 'date')}
+          ${numberRow('lrent','Monthly Rent (KES)', item.rent, 0)}
+          ${numberRow('dep','Deposit (KES)', item.deposit, 0)}
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Status</span>
+            <select id="lstatus">${['active','pending','ended'].map(s=>`<option ${s===item.status?'selected':''}>${s}</option>`).join('')}</select>
+          </label>
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { ...item, unitId:inputVal('unitId'), tenantId:inputVal('tenantId'), startDate:inputVal('start'), endDate:inputVal('end'), rent:+inputVal('lrent'), deposit:+inputVal('dep'), status:inputVal('lstatus') };
+          if(!rec.unitId || !rec.tenantId) return alert('Select unit & tenant');
+          if(!rec.startDate || !rec.endDate) return alert('Provide lease dates');
+          if(id){ state.leases = state.leases.map(l=>l.id===id?rec:l);} else { state.leases.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    function openWorkOrderModal(id){
+      const item = id? state.workOrders.find(w=>w.id===id): { id:uid('w'), propertyId: state.properties[0]?.id||'', unitId: state.units[0]?.id||'', title:'', description:'', priority:'medium', status:'open', createdAt: nowISO() };
+      openModal(id?'Edit Work Order':'Add Work Order', `
+        <div class="grid">
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Property</span>
+            <select id="wprop">${state.properties.map(p=>`<option value="${p.id}" ${p.id===item.propertyId?'selected':''}>${p.name}</option>`).join('')}</select>
+          </label>
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Unit</span>
+            <select id="wunit">${state.units.map(u=>`<option value="${u.id}" ${u.id===item.unitId?'selected':''}>${u.name}</option>`).join('')}</select>
+          </label>
+          ${textRow('wtitle','Title', item.title)}
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Description</span><textarea id="wdesc">${item.description||''}</textarea></label>
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Priority</span>
+            <select id="wprio">${['low','medium','high'].map(s=>`<option ${s===item.priority?'selected':''}>${s}</option>`).join('')}</select>
+          </label>
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Status</span>
+            <select id="wstatus">${['open','in-progress','closed'].map(s=>`<option ${s===item.status?'selected':''}>${s}</option>`).join('')}</select>
+          </label>
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { ...item, propertyId:inputVal('wprop'), unitId:inputVal('wunit'), title:inputVal('wtitle'), description:el('#wdesc').value, priority:inputVal('wprio'), status:inputVal('wstatus') };
+          if(!rec.title.trim()) return alert('Title is required');
+          if(id){ state.workOrders = state.workOrders.map(w=>w.id===id?rec:w);} else { state.workOrders.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    function openPaymentModal(ref){
+      const item = ref? state.payments.find(p=>p.reference===ref): { leaseId: state.leases[0]?.id||'', amount:0, method:'mpesa', date: new Date().toISOString().slice(0,10), reference: uid('PAY') };
+      const m = maps();
+      openModal(ref?'Edit Payment':'Add Payment', `
+        <div class="grid">
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Lease</span>
+            <select id="payLease">${state.leases.map(l=>{const u=m.units[l.unitId], t=m.tenants[l.tenantId]; return `<option value="${l.id}" ${l.id===item.leaseId?'selected':''}>${l.id} – ${u?.name||'-'} / ${t?.name||'-'}</option>`}).join('')}</select>
+          </label>
+          ${numberRow('payAmt','Amount (KES)', item.amount, 0)}
+          <label class="grid grid-2" style="align-items:center"><span class="muted">Method</span>
+            <select id="payMethod">${['mpesa','bank','cash'].map(s=>`<option ${s===item.method?'selected':''}>${s}</option>`).join('')}</select>
+          </label>
+          ${textRow('payDate','Date', item.date, 'date')}
+          ${textRow('payRef','Reference', item.reference)}
+          <div class="help">Tip: Use the lease dropdown to ensure the payment links to the right tenant & unit.</div>
+        </div>
+      `,[
+        {label:'Cancel', class:'ghost', onClick:closeModal},
+        {label:'Save', class:'primary', onClick:()=>{
+          const rec = { leaseId:inputVal('payLease'), amount:+inputVal('payAmt'), method:inputVal('payMethod'), date:inputVal('payDate'), reference:inputVal('payRef') };
+          if(!rec.leaseId) return alert('Select lease');
+          if(!rec.amount || rec.amount<0) return alert('Enter a valid amount');
+          const exists = state.payments.find(p=>p.reference===rec.reference);
+          if(exists && !ref){ return alert('Reference already exists'); }
+          if(ref){ state.payments = state.payments.map(p=>p.reference===ref?rec:p);} else { state.payments.push(rec);} save(); closeModal(); render();
+        }}
+      ]);
+    }
+
+    // ===== Export CSV =====
+    function exportCSV(){
+      const m = maps();
+      const rows = [];
+      rows.push(['Type','Name/Title','Property','Unit','Tenant','Amount','Date','Extra'].join(','));
+      state.properties.forEach(p=>rows.push(['Property', p.name, p.address, '', '', '', p.createdAt, `Manager: ${p.manager}`].join(',')));
+      state.units.forEach(u=>rows.push(['Unit', u.name, m.properties[u.propertyId]?.name||'', '', '', u.rent, '', `Status: ${u.status}`].join(',')));
+      state.tenants.forEach(t=>rows.push(['Tenant', t.name, '', '', t.email, '', '', t.phone].join(',')));
+      state.leases.forEach(l=>rows.push(['Lease', l.id, m.properties[m.units[l.unitId]?.propertyId]?.name||'', m.units[l.unitId]?.name||'', m.tenants[l.tenantId]?.name||'', l.rent, `${l.startDate}->${l.endDate}`, l.status].join(',')));
+      state.payments.forEach(p=>rows.push(['Payment', p.reference, m.properties[m.units[m.leases[p.leaseId]?.unitId]?.propertyId]?.name||'', m.units[m.leases[p.leaseId]?.unitId]?.name||'', m.tenants[m.leases[p.leaseId]?.tenantId]?.name||'', p.amount, p.date, p.method].join(',')));
+      const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=`pms_export_${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    }
+
+    // ===== Events =====
+    q.addEventListener('input', ()=> render());
+    document.getElementById('export').onclick = exportCSV;
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
